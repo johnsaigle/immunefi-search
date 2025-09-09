@@ -28,6 +28,10 @@ module ImmuneFiSearch
           @options[:repo] = repo
         end
 
+        opts.on('-f', '--full', 'Run comprehensive search: global + high-value repositories (use with --search)') do
+          @options[:full] = true
+        end
+
         opts.on('-v', '--verbose', 'Show detailed asset information in list mode') do
           @options[:verbose] = true
         end
@@ -65,12 +69,22 @@ module ImmuneFiSearch
         puts 'Or run with the token:'
         if @options[:repo]
           puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}' --repo #{@options[:repo]}"
+        elsif @options[:full]
+          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}' --full"
         else
           puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}'"
         end
         exit 1
       end
 
+      # Validate conflicting flags
+      if @options[:repo] && @options[:full]
+        puts 'Error: --repo and --full flags cannot be used together'
+        puts 'Use --repo for single repository search, or --full for comprehensive search'
+        exit 1
+      end
+
+      # Validate repo format if specified
       return unless @options[:repo] && !@options[:repo].match?(%r{\A[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+\z})
 
       puts 'Error: Repository must be in OWNER/REPO format'
