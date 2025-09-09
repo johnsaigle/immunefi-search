@@ -28,7 +28,7 @@ class ImmuneFiSearch
     filter_and_display_projects(projects, verbose)
   end
 
-  def run_search_mode(query, _verbose = false)
+  def run_search_mode(query, verbose = false)
     token = ENV['GITHUB_TOKEN']
     raise 'Please set GITHUB_TOKEN environment variable' unless token
 
