@@ -45,6 +45,19 @@ This will:
 - Ruby 3.x
 - For search mode: GitHub Personal Access Token set as `GITHUB_TOKEN` environment variable
 
+### GitHub API Rate Limits
+
+The tool automatically handles GitHub API rate limiting:
+- **Unauthenticated**: 10 search requests per minute
+- **Authenticated**: 30 search requests per minute  
+- **Personal Access Token**: 5,000 requests per hour
+
+The script will:
+- Show current rate limit status before searching
+- Add delays between requests to prevent hitting limits
+- Provide clear error messages if rate limited
+- Suggest using a Personal Access Token for higher limits
+
 ## Output
 
 ### List Mode

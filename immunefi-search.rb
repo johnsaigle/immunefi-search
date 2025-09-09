@@ -34,16 +34,26 @@ class ImmuneFiSearch
 
     puts "Searching GitHub for: #{query}"
     puts 'Cross-referencing with Immunefi bounties...'
+
+    # Check rate limit status
+    check_rate_limit_status(token)
     puts ''
 
     # Fetch GitHub search results for each target language
     github_results = []
-    TARGET_LANGUAGES.each do |lang|
-      next if lang == 'move' # GitHub doesn't have Move language support yet
+    search_languages = TARGET_LANGUAGES.reject { |lang| lang == 'move' } # GitHub doesn't have Move language support yet
+
+    search_languages.each_with_index do |lang, index|
+      puts "Searching #{lang.upcase} repositories... (#{index + 1}/#{search_languages.length})"
 
       results = search_github(query, lang, token)
       github_results += parse_github_results(results, lang) if results
+
+      # Add a small delay between requests to be respectful to the API
+      sleep(1) if index < search_languages.length - 1
     end
+
+    puts "GitHub search completed. Found #{github_results.length} total results."
 
     # Load Immunefi bounty URLs for cross-reference
     bounty_repos = load_bounty_repositories
@@ -171,8 +181,19 @@ class ImmuneFiSearch
 
     Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
       res = http.request(req)
-      if res.code == '200'
+
+      case res.code
+      when '200'
         JSON.parse(res.body)
+      when '403'
+        handle_rate_limit(res, language)
+        nil
+      when '422'
+        puts "GitHub API error for #{language}: Invalid search query or too complex"
+        nil
+      when '503'
+        puts "GitHub API error for #{language}: Service temporarily unavailable"
+        nil
       else
         puts "GitHub API error for #{language}: #{res.code} #{res.message}"
         nil
@@ -181,6 +202,63 @@ class ImmuneFiSearch
   rescue JSON::ParserError, StandardError => e
     puts "Error searching GitHub for #{language}: #{e.message}"
     nil
+  end
+
+  def check_rate_limit_status(token)
+    uri = URI('https://api.github.com/rate_limit')
+    req = Net::HTTP::Get.new(uri)
+    req['Authorization'] = "Bearer #{token}"
+
+    Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      res = http.request(req)
+      if res.code == '200'
+        rate_info = JSON.parse(res.body)
+        search_limit = rate_info.dig('resources', 'search')
+
+        if search_limit
+          remaining = search_limit['remaining']
+          limit = search_limit['limit']
+          reset_time = Time.at(search_limit['reset'])
+
+          puts "GitHub API Status: #{remaining}/#{limit} search requests remaining"
+
+          if remaining < TARGET_LANGUAGES.length
+            puts "⚠️  Warning: Low rate limit remaining. Reset at #{reset_time.strftime('%H:%M:%S')}"
+          end
+        end
+      end
+    end
+  rescue StandardError => e
+    puts "Note: Could not check GitHub rate limit status (#{e.message})"
+  end
+
+  def handle_rate_limit(response, language)
+    # Check if it's rate limiting or other 403 error
+    rate_limit_remaining = response['X-RateLimit-Remaining']&.to_i
+    rate_limit_reset = response['X-RateLimit-Reset']&.to_i
+
+    if rate_limit_remaining == 0 && rate_limit_reset
+      reset_time = Time.at(rate_limit_reset)
+      wait_minutes = ((reset_time - Time.now) / 60).ceil
+
+      puts "⚠️  GitHub API rate limit exceeded for #{language} searches"
+      puts "   Rate limit will reset at: #{reset_time.strftime('%H:%M:%S')}"
+      puts "   Wait time: ~#{wait_minutes} minutes"
+      puts '   Note: Authenticated requests have higher limits (5,000/hour vs 10/minute)'
+
+      # Check if the token looks like a personal access token
+      if ENV['GITHUB_TOKEN']&.start_with?('ghp_')
+        puts '   ✓ Using Personal Access Token (higher rate limits should apply)'
+      else
+        puts '   ⚠️  Consider using a GitHub Personal Access Token for higher rate limits'
+      end
+    elsif response.body&.include?('rate limit')
+      puts "⚠️  GitHub API rate limit exceeded for #{language} searches"
+      puts "   Response: #{response.body}"
+    else
+      puts "GitHub API 403 error for #{language}: #{response.message}"
+      puts '   This might be due to insufficient permissions or repository access restrictions'
+    end
   end
 
   def parse_github_results(results, language)
@@ -234,7 +312,18 @@ class ImmuneFiSearch
 
     github_results.each do |result|
       # Check if this repository matches any bounty repository
-      matching_bounty = bounty_repos.find { |bounty_url| bounty_url.start_with?(result[:repo_url]) }
+      # Handle cases where bounty URLs include paths/branches (e.g., /tree/master/src)
+      matching_bounty = bounty_repos.find do |bounty_url|
+        # Extract base repo URL from bounty URL for GitHub repositories
+        if bounty_url.include?('github.com')
+          bounty_base = bounty_url.match(%r{(https://github\.com/[^/]+/[^/]+)})&.[](1)
+          bounty_base == result[:repo_url]
+        else
+          # For non-GitHub URLs, use the original logic
+          bounty_url.start_with?(result[:repo_url])
+        end
+      end
+
       next unless matching_bounty
 
       matches_found = true
@@ -280,6 +369,7 @@ class ImmuneFiSearch
     puts "- The search term doesn't exist in any bounty repositories"
     puts "- The repositories containing the search term don't have active bounties"
     puts "- The search term exists but not in the target languages (#{TARGET_LANGUAGES.join(', ')})"
+    puts "- The search term exists but too many results from irrelevant repositories are returned by GitHub search"
   end
 
   def format_currency(amount)
