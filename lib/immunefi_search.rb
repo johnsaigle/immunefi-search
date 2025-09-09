@@ -34,10 +34,28 @@ module ImmuneFiSearch
       end
     end
 
-    def run_search_mode(query)
+    def run_search_mode(query, repo = nil)
       token = ENV['GITHUB_TOKEN']
-      raise 'Please set GITHUB_TOKEN environment variable' unless token
 
+      if repo
+        run_single_repository_search(query, repo, token)
+      else
+        run_multi_phase_search(query, token)
+      end
+    end
+
+    private
+
+    def run_single_repository_search(query, repo, token)
+      # Check rate limit status
+      @rate_limiter.check_rate_limit_status(token)
+      puts ''
+
+      results = @github_searcher.search_single_repository(query, repo, token)
+      @formatter.display_search_results(results)
+    end
+
+    def run_multi_phase_search(query, token)
       puts "Searching GitHub for: #{query}"
       puts 'Cross-referencing with Immunefi bounties...'
 
@@ -58,8 +76,6 @@ module ImmuneFiSearch
         @formatter.display_search_results(cross_referenced_results)
       end
     end
-
-    private
 
     def run_phase_2_search(query, token)
       puts 'Phase 1 (global search) found no cross-referenced results.'

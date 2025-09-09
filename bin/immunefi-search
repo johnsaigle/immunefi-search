@@ -17,7 +17,7 @@ def main
   when :list
     app.run_list_mode(options[:verbose])
   when :search
-    app.run_search_mode(options[:query])
+    app.run_search_mode(options[:query], options[:repo])
   end
 rescue StandardError => e
   puts "Error: #{e.message}"

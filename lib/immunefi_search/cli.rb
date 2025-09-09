@@ -24,6 +24,10 @@ module ImmuneFiSearch
         opts.separator ''
         opts.separator 'Options:'
 
+        opts.on('-r', '--repo OWNER/REPO', 'Search in specific repository (use with --search)') do |repo|
+          @options[:repo] = repo
+        end
+
         opts.on('-v', '--verbose', 'Show detailed asset information in list mode') do
           @options[:verbose] = true
         end
@@ -45,10 +49,32 @@ module ImmuneFiSearch
 
     def validate_arguments
       return unless @options[:mode] == :search
-      return unless @options[:query].nil? || @options[:query].strip.empty?
 
-      puts 'Error: Search query is required for search mode'
-      puts "Usage: immunefi-search --search 'your search term'"
+      if @options[:query].nil? || @options[:query].strip.empty?
+        puts 'Error: Search query is required for search mode'
+        puts "Usage: immunefi-search --search 'your search term'"
+        exit 1
+      end
+
+      # Check for GITHUB_TOKEN in search mode
+      unless ENV['GITHUB_TOKEN']
+        puts 'Error: GITHUB_TOKEN environment variable is required for search mode'
+        puts 'Please set your GitHub token:'
+        puts '  export GITHUB_TOKEN=your_github_token_here'
+        puts ''
+        puts 'Or run with the token:'
+        if @options[:repo]
+          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}' --repo #{@options[:repo]}"
+        else
+          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}'"
+        end
+        exit 1
+      end
+
+      return unless @options[:repo] && !@options[:repo].match?(%r{\A[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+\z})
+
+      puts 'Error: Repository must be in OWNER/REPO format'
+      puts 'Example: --repo wormhole-foundation/wormhole'
       exit 1
     end
   end

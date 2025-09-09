@@ -27,8 +27,10 @@ module ImmuneFiSearch
     end
 
     def search_repository(query, owner, repo, token)
-      encoded_query = URI.encode_www_form_component(query)
-      uri = URI("https://api.github.com/repos/#{owner}/#{repo}/search/code?q=#{encoded_query}")
+      # Use GitHub's global code search API with repo qualifier
+      search_query = "#{query} repo:#{owner}/#{repo}"
+      encoded_query = URI.encode_www_form_component(search_query)
+      uri = URI("https://api.github.com/search/code?q=#{encoded_query}")
 
       req = Net::HTTP::Get.new(uri)
       req['Accept'] = 'application/vnd.github.v3.text-match+json'
@@ -42,18 +44,48 @@ module ImmuneFiSearch
           results = JSON.parse(res.body)
           parse_repository_search_results(results, owner, repo)
         when '403'
-          return nil if res['X-RateLimit-Remaining']&.to_i == 0
-
-          # Signal rate limit hit
-
-          return [] # Access denied but continue
-
+          if res['X-RateLimit-Remaining']&.to_i == 0
+            puts "⚠️ Rate limited - remaining: #{res['X-RateLimit-Remaining']}, reset at: #{Time.at(res['X-RateLimit-Reset'].to_i)}"
+            return nil # Signal rate limit hit
+          else
+            puts '⚠️ Access forbidden (403) - may be private repo or insufficient permissions'
+            return [] # Access denied but continue
+          end
+        when '404'
+          puts "⚠️ Repository #{owner}/#{repo} not found (404)"
+          return []
+        when '422'
+          puts '⚠️ Search query invalid or too complex (422)'
+          return []
         else
+          puts "⚠️ GitHub API error: #{res.code} #{res.message}"
+          puts "Response body: #{res.body[0..200]}..." if res.body
           return [] # Other errors but continue
         end
       end
-    rescue StandardError
+    rescue StandardError => e
+      puts "⚠️ Network error searching #{owner}/#{repo}: #{e.message}"
       [] # Network errors but continue
+    end
+
+    def search_single_repository(query, repo_spec, token)
+      owner, repo = repo_spec.split('/', 2)
+      puts "Searching repository #{owner}/#{repo} for: #{query}"
+      puts "API endpoint: https://api.github.com/search/code?q=#{query} repo:#{owner}/#{repo}"
+      puts ''
+
+      results = search_repository(query, owner, repo, token)
+
+      if results.nil?
+        puts '⚠️ Search failed due to rate limiting'
+        []
+      elsif results.empty?
+        puts '❌ No matches found (or search failed - see warnings above)'
+        []
+      else
+        puts "✅ Found #{results.length} matches"
+        results
+      end
     end
 
     def search_high_value_repositories(query, token, high_value_repos)
