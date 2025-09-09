@@ -1,18 +1,26 @@
 # Agent Guidelines for immunefi-search
 
 ## Build/Test/Lint Commands
-- **Run list mode**: `ruby immunefi-search.rb --list` (or just `ruby immunefi-search.rb`)
-- **Run search mode**: `GITHUB_TOKEN=xxx ruby immunefi-search.rb --search "pattern"`
-- **Legacy script**: `ruby script.rb` (still available)
+- **Run list mode**: `./bin/immunefi-search --list` (or just `./bin/immunefi-search`)
+- **Run search mode**: `GITHUB_TOKEN=xxx ./bin/immunefi-search --search "pattern"`
+- **Legacy monolithic script**: `ruby immunefi-search.rb` (backup)
 - **Lint code**: `rubocop` (available globally)
 - **No test framework** currently configured
 
-## Project Structure
-- Main script: `immunefi-search.rb` - combined Immunefi + GitHub search tool
-- Legacy script: `script.rb` - original Immunefi-only search
-- Data directory: `data/` - stores fetched project data and details
-- Code search: `code-search/` - original GitHub search tool (merged into main)
-- Ruby LSP config: `.ruby-lsp/` - development tooling
+## Project Structure (Modular)
+- **bin/immunefi-search** - Main executable entry point
+- **lib/immunefi_search.rb** - Main orchestrator class
+- **lib/immunefi_search/** - Modular components:
+  - `config.rb` - Configuration constants and settings
+  - `cli.rb` - Command line interface and argument parsing
+  - `bounty_manager.rb` - Immunefi API operations and bounty data management
+  - `github_searcher.rb` - GitHub API search operations (Phase 1 & 2)
+  - `repository_filter.rb` - Repository filtering and cross-referencing logic
+  - `rate_limiter.rb` - GitHub API rate limiting and delay management
+  - `result_formatter.rb` - Output formatting for list and search modes
+- **data/** - Cached bounty data and project details
+- **Gemfile** - Ruby dependency management
+- **Legacy files**: `script.rb`, `immunefi-search.rb`, `code-search/`
 
 ## Code Style Guidelines
 - **Language**: Ruby 3.4.4

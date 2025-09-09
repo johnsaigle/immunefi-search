@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+
+# Add lib directory to load path
+lib_path = File.expand_path('../lib', __dir__)
+$LOAD_PATH.unshift(lib_path) unless $LOAD_PATH.include?(lib_path)
+
+require 'immunefi_search'
+require 'immunefi_search/cli'
+
+def main
+  cli = ImmuneFiSearch::CLI.new
+  options = cli.parse_arguments
+  
+  app = ImmuneFiSearch::Application.new
+
+  case options[:mode]
+  when :list
+    app.run_list_mode(options[:verbose])
+  when :search
+    app.run_search_mode(options[:query])
+  end
+rescue StandardError => e
+  puts "Error: #{e.message}"
+  exit 1
+end
+
+main if __FILE__ == $0

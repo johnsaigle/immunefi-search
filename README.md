@@ -12,9 +12,9 @@ Combined tool for Immunefi bug bounty analysis and GitHub code search integratio
 ### List All Bounties (Default Mode)
 
 ```bash
-ruby immunefi-search.rb --list
+./bin/immunefi-search --list
 # or simply
-ruby immunefi-search.rb
+./bin/immunefi-search
 ```
 
 Displays concise list of bug bounty programs that match:
@@ -24,14 +24,14 @@ Displays concise list of bug bounty programs that match:
 
 For detailed asset information:
 ```bash
-ruby immunefi-search.rb --list --verbose
+./bin/immunefi-search --list --verbose
 ```
 
 ### Search GitHub Code + Cross-Reference
 
 ```bash
 export GITHUB_TOKEN="your_github_token_here"
-ruby immunefi-search.rb --search "log.topics[0]"
+./bin/immunefi-search --search "log.topics[0]"
 ```
 
 This will:
