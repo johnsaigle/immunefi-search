@@ -3,7 +3,6 @@
 ## Build/Test/Lint Commands
 - **Run list mode**: `ruby immunefi-search.rb --list` (or just `ruby immunefi-search.rb`)
 - **Run search mode**: `GITHUB_TOKEN=xxx ruby immunefi-search.rb --search "pattern"`
-- **Run search verbose**: `GITHUB_TOKEN=xxx ruby immunefi-search.rb --search "pattern" --verbose`
 - **Legacy script**: `ruby script.rb` (still available)
 - **Lint code**: `rubocop` (available globally)
 - **No test framework** currently configured

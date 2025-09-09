@@ -28,7 +28,7 @@ class ImmuneFiSearch
     filter_and_display_projects(projects, verbose)
   end
 
-  def run_search_mode(query, verbose = false)
+  def run_search_mode(query)
     token = ENV['GITHUB_TOKEN']
     raise 'Please set GITHUB_TOKEN environment variable' unless token
 
@@ -48,8 +48,8 @@ class ImmuneFiSearch
     # Load Immunefi bounty URLs for cross-reference
     bounty_repos = load_bounty_repositories
 
-    # Cross-reference and display results
-    display_cross_referenced_results(github_results, bounty_repos, verbose)
+    # Cross-reference and display results (always verbose for search)
+    display_cross_referenced_results(github_results, bounty_repos, true)
   end
 
   private
@@ -306,7 +306,7 @@ def main
     end
     opts.separator ''
     opts.separator 'Options:'
-    opts.on('-v', '--verbose', 'Show detailed output (asset details in list mode, code fragments in search mode)') do
+    opts.on('-v', '--verbose', 'Show detailed asset information in list mode') do
       options[:verbose] = true
     end
     opts.on('-h', '--help', 'Show this help message') do
@@ -329,7 +329,7 @@ def main
       puts "Usage: #{$0} --search 'your search term'"
       exit 1
     end
-    searcher.run_search_mode(options[:query], options[:verbose])
+    searcher.run_search_mode(options[:query])
   end
 end
 

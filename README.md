@@ -34,16 +34,11 @@ export GITHUB_TOKEN="your_github_token_here"
 ruby immunefi-search.rb --search "log.topics[0]"
 ```
 
-For detailed output including code fragments and descriptions:
-```bash
-ruby immunefi-search.rb --search "log.topics[0]" --verbose
-```
-
 This will:
 1. Search GitHub for the specified code pattern across target languages
 2. Cross-reference results with Immunefi bounty repositories
 3. Display matches that exist in both GitHub and Immunefi scopes
-4. In verbose mode: show code fragments, repository descriptions, and bounty asset URLs
+4. Show code fragments, repository descriptions, and bounty asset URLs
 
 ## Requirements
 
@@ -64,11 +59,9 @@ This will:
 ### Search Mode  
 For each GitHub/Immunefi match:
 - Repository information and matched file details
-- Match count (default mode)
-- **Verbose mode adds**:
-  - Code fragments containing the search pattern
-  - Repository descriptions and bounty asset URLs
-  - Highlighted text matches
+- Code fragments containing the search pattern
+- Repository descriptions and bounty asset URLs
+- Highlighted text matches
 
 ## Data Caching
 
