@@ -19,16 +19,16 @@ class ImmuneFiSearch
     FileUtils.mkdir_p(@details_dir) unless Dir.exist?(@details_dir)
   end
 
-  def run_list_mode
+  def run_list_mode(verbose = false)
     puts "Immunefi search for #{TARGET_LANGUAGES.join(', ').upcase} programs"
     puts 'Filtering for blockchain/DLT and smart contract bounties >$100k'
     puts ''
 
     projects = fetch_projects
-    filter_and_display_projects(projects)
+    filter_and_display_projects(projects, verbose)
   end
 
-  def run_search_mode(query)
+  def run_search_mode(query, _verbose = false)
     token = ENV['GITHUB_TOKEN']
     raise 'Please set GITHUB_TOKEN environment variable' unless token
 
@@ -49,7 +49,7 @@ class ImmuneFiSearch
     bounty_repos = load_bounty_repositories
 
     # Cross-reference and display results
-    display_cross_referenced_results(github_results, bounty_repos)
+    display_cross_referenced_results(github_results, bounty_repos, verbose)
   end
 
   private
@@ -72,7 +72,7 @@ class ImmuneFiSearch
     end
   end
 
-  def filter_and_display_projects(projects)
+  def filter_and_display_projects(projects, verbose = false)
     projects.each do |program|
       # Check if program uses any of our target languages
       program_languages = program['tags']['language'].map(&:downcase)
@@ -91,7 +91,7 @@ class ImmuneFiSearch
       next if target_rewards.nil? || target_rewards.empty?
 
       # Display project information
-      display_project(program, project_details, target_rewards, program_languages)
+      display_project(program, project_details, target_rewards, program_languages, verbose)
     end
   end
 
@@ -116,34 +116,49 @@ class ImmuneFiSearch
     nil
   end
 
-  def display_project(program, project_details, target_rewards, program_languages)
+  def display_project(program, project_details, target_rewards, program_languages, verbose = false)
     matching_languages = TARGET_LANGUAGES.select { |lang| program_languages.include?(lang) }
     language_display = matching_languages.map(&:upcase).join(', ')
 
-    puts '=' * 60
-    puts "PROJECT: #{program['project']} [#{language_display}]"
-    puts "URL: https://immunefi.com/bounty/#{program['id']}"
-    puts "Max Bounty: #{format_currency(project_details.dig('pageProps', 'bounty', 'maxBounty'))}"
-    puts '=' * 60
+    if verbose
+      puts '=' * 60
+      puts "PROJECT: #{program['project']} [#{language_display}]"
+      puts "URL: https://immunefi.com/bounty/#{program['id']}"
+      puts "Max Bounty: #{format_currency(project_details.dig('pageProps', 'bounty', 'maxBounty'))}"
+      puts '=' * 60
 
-    puts "\nBOUNTIES:"
-    target_rewards.each do |reward|
-      asset_type_display = reward['assetType'] == 'blockchain_dlt' ? 'Blockchain/DLT' : 'Smart Contract'
-      min_reward = reward['minReward'] ? format_currency(reward['minReward']) : '0'
-      max_reward = format_currency(reward['maxReward'])
-      puts "  • #{asset_type_display}: $#{min_reward} - $#{max_reward} (#{reward['severity']})"
-    end
+      puts "\nBOUNTIES:"
+      target_rewards.each do |reward|
+        asset_type_display = reward['assetType'] == 'blockchain_dlt' ? 'Blockchain/DLT' : 'Smart Contract'
+        min_reward = reward['minReward'] ? format_currency(reward['minReward']) : '0'
+        max_reward = format_currency(reward['maxReward'])
+        puts "  • #{asset_type_display}: $#{min_reward} - $#{max_reward} (#{reward['severity']})"
+      end
 
-    puts "\nASSETS:"
-    project_details.dig('pageProps', 'bounty', 'assets')&.each do |asset|
-      next unless %w[blockchain_dlt smart_contract].include?(asset['type'])
+      puts "\nASSETS:"
+      asset_count = 0
+      project_details.dig('pageProps', 'bounty', 'assets')&.each do |asset|
+        next unless %w[blockchain_dlt smart_contract].include?(asset['type'])
 
-      puts "  • #{asset['description']}"
-      puts "    Type: #{asset['type']}"
-      puts "    URL: #{asset['url']}"
+        asset_count += 1
+
+        puts "  • #{asset['description']}"
+        puts "    Type: #{asset['type']}"
+        puts "    URL: #{asset['url']}"
+        puts ''
+      end
+      puts ''
+    else
+      # Concise output for non-verbose mode
+      max_bounty = format_currency(project_details.dig('pageProps', 'bounty', 'maxBounty'))
+      asset_count = project_details.dig('pageProps', 'bounty', 'assets')&.count do |asset|
+        %w[blockchain_dlt smart_contract].include?(asset['type'])
+      end || 0
+
+      puts "#{program['project']} [#{language_display}] - $#{max_bounty} (#{asset_count} assets)"
+      puts "  https://immunefi.com/bounty/#{program['id']}"
       puts ''
     end
-    puts ''
   end
 
   def search_github(query, language, token)
@@ -214,7 +229,7 @@ class ImmuneFiSearch
     bounty_repos
   end
 
-  def display_cross_referenced_results(github_results, bounty_repos)
+  def display_cross_referenced_results(github_results, bounty_repos, verbose = false)
     matches_found = false
 
     github_results.each do |result|
@@ -224,30 +239,36 @@ class ImmuneFiSearch
 
       matches_found = true
 
-      puts '=' * 80
-      puts '🎯 BOUNTY MATCH FOUND!'
-      puts "Repository: #{result[:full_name]} (#{result[:language].upcase})"
+      puts '=' * 60
+      puts "🎯 BOUNTY MATCH: #{result[:full_name]} (#{result[:language].upcase})"
       puts "File: #{result[:filepath]}"
-      puts "GitHub URL: #{result[:file_url]}"
-      puts "Description: #{result[:description]}" if result[:description]
-      puts "Bounty Asset URL: #{matching_bounty}"
-      puts '-' * 40
+      puts "GitHub: #{result[:file_url]}"
 
-      result[:text_matches].each_with_index do |match, index|
-        puts "Match #{index + 1}:"
+      if verbose
+        puts "Description: #{result[:description]}" if result[:description]
+        puts "Bounty Asset: #{matching_bounty}"
+        puts '-' * 40
 
-        if match[:matches] && !match[:matches].empty?
-          puts 'Matched text:'
-          match[:matches].each do |text_match|
-            puts "  - \"#{text_match['text']}\""
+        result[:text_matches].each_with_index do |match, index|
+          puts "Match #{index + 1}:"
+
+          if match[:matches] && !match[:matches].empty?
+            puts 'Matched text:'
+            match[:matches].each do |text_match|
+              puts "  - \"#{text_match['text']}\""
+            end
           end
-        end
 
-        puts 'Code fragment:'
-        puts "```#{result[:language]}"
-        puts match[:fragment]
-        puts '```'
-        puts
+          puts 'Code fragment:'
+          puts "```#{result[:language]}"
+          puts match[:fragment]
+          puts '```'
+          puts
+        end
+      else
+        # Show just the count of matches in non-verbose mode
+        match_count = result[:text_matches].length
+        puts "Matches: #{match_count}"
       end
       puts
     end
@@ -285,6 +306,9 @@ def main
     end
     opts.separator ''
     opts.separator 'Options:'
+    opts.on('-v', '--verbose', 'Show detailed output (asset details in list mode, code fragments in search mode)') do
+      options[:verbose] = true
+    end
     opts.on('-h', '--help', 'Show this help message') do
       puts opts
       exit
@@ -298,14 +322,14 @@ def main
 
   case options[:mode]
   when :list
-    searcher.run_list_mode
+    searcher.run_list_mode(options[:verbose])
   when :search
     if options[:query].nil? || options[:query].strip.empty?
       puts 'Error: Search query is required for search mode'
       puts "Usage: #{$0} --search 'your search term'"
       exit 1
     end
-    searcher.run_search_mode(options[:query])
+    searcher.run_search_mode(options[:query], options[:verbose])
   end
 end
 
