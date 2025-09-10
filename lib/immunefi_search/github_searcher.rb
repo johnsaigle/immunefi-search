@@ -9,26 +9,40 @@ module ImmuneFiSearch
       @rate_limiter = RateLimiter.new
     end
 
-    def global_search(query, token)
+    def global_search(query, token, language = nil)
       github_results = []
 
-      ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.each_with_index do |lang, index|
-        puts "Searching #{lang.upcase} repositories... (#{index + 1}/#{ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.length})"
+      # If language filter is specified, only search that language
+      languages_to_search = if language && ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.include?(language.downcase)
+                              [language.downcase]
+                            else
+                              ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES
+                            end
+
+      if language && !ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.include?(language.downcase)
+        puts "Warning: Language '#{language}' not supported for global search (GitHub API limitation)"
+        puts "Supported languages for global search: #{ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.join(', ')}"
+        return []
+      end
+
+      languages_to_search.each_with_index do |lang, index|
+        puts "Searching #{lang.upcase} repositories... (#{index + 1}/#{languages_to_search.length})"
 
         results = search_github_by_language(query, lang, token)
         github_results += parse_github_results(results, lang) if results
 
         # Add delay between requests to be respectful to the API
-        @rate_limiter.api_delay if index < ImmuneFiSearch::GITHUB_SEARCH_LANGUAGES.length - 1
+        @rate_limiter.api_delay if index < languages_to_search.length - 1
       end
 
       puts "GitHub search completed. Found #{github_results.length} total results."
       github_results
     end
 
-    def search_repository(query, owner, repo, token)
+    def search_repository(query, owner, repo, token, language = nil)
       # Use GitHub's global code search API with repo qualifier
       search_query = "#{query} repo:#{owner}/#{repo}"
+      search_query += " language:#{language}" if language
       encoded_query = URI.encode_www_form_component(search_query)
       uri = URI("https://api.github.com/search/code?q=#{encoded_query}")
 
@@ -68,13 +82,71 @@ module ImmuneFiSearch
       [] # Network errors but continue
     end
 
-    def search_single_repository(query, repo_spec, token)
+    def fetch_organization_repositories(org, token)
+      puts "Fetching repositories from #{org} organization..."
+      repos = []
+      page = 1
+
+      loop do
+        uri = URI("https://api.github.com/orgs/#{org}/repos?per_page=100&page=#{page}&sort=updated")
+        req = Net::HTTP::Get.new(uri)
+        req['Accept'] = 'application/vnd.github+json'
+        req['Authorization'] = "Bearer #{token}"
+
+        Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+          res = http.request(req)
+
+          case res.code
+          when '200'
+            page_repos = JSON.parse(res.body)
+            return repos if page_repos.empty? # No more pages
+
+            page_repos.each do |repo|
+              repos << {
+                name: repo['name'],
+                language: repo['language'],
+                private: repo['private'],
+                archived: repo['archived']
+              }
+            end
+
+            page += 1
+            @rate_limiter.api_delay # Be respectful to API
+          when '404'
+            puts "⚠️ Organization #{org} not found or not accessible"
+            return []
+          when '403'
+            if res['X-RateLimit-Remaining']&.to_i == 0
+              puts '⚠️ Rate limited while fetching org repos'
+              return []
+            else
+              puts "⚠️ Access forbidden to #{org} organization"
+              return []
+            end
+          else
+            puts "⚠️ Error fetching org repos: #{res.code} #{res.message}"
+            return []
+          end
+        end
+      end
+
+      # Filter out private and archived repos
+      accessible_repos = repos.reject { |repo| repo[:private] || repo[:archived] }
+      puts "Filtered to #{accessible_repos.length} public, non-archived repositories"
+      accessible_repos
+    rescue StandardError => e
+      puts "⚠️ Network error fetching organization repositories: #{e.message}"
+      []
+    end
+
+    def search_single_repository(query, repo_spec, token, language = nil)
       owner, repo = repo_spec.split('/', 2)
-      puts "Searching repository #{owner}/#{repo} for: #{query}"
-      puts "API endpoint: https://api.github.com/search/code?q=#{query} repo:#{owner}/#{repo}"
+      language_filter = language ? " language:#{language}" : ''
+      puts "Searching repository #{owner}/#{repo} for: #{query}#{language_filter}"
+      puts "API endpoint: https://api.github.com/search/code?q=#{query}#{language_filter} repo:#{owner}/#{repo}"
       puts ''
 
-      results = search_repository(query, owner, repo, token)
+      results = search_repository(query, owner, repo, token, language)
 
       if results.nil?
         puts '⚠️ Search failed due to rate limiting'
@@ -88,8 +160,58 @@ module ImmuneFiSearch
       end
     end
 
-    def search_high_value_repositories(query, token, high_value_repos)
-      puts "Searching #{high_value_repos.length} high-value bounty repositories (sorted by bounty size)"
+    def search_organization_repositories(query, org, token, language = nil)
+      puts "Discovering repositories in #{org} organization..."
+
+      # Get list of repositories in the organization
+      org_repos = fetch_organization_repositories(org, token)
+
+      if org_repos.empty?
+        puts "❌ No accessible repositories found in #{org} organization"
+        return []
+      end
+
+      language_filter = language ? " (#{language.upcase} only)" : ''
+      puts "Found #{org_repos.length} repositories in #{org}#{language_filter}"
+      puts ''
+
+      all_results = []
+
+      org_repos.each_with_index do |repo_info, index|
+        repo_name = repo_info[:name]
+        repo_language = repo_info[:language]
+
+        # Skip repositories that don't match language filter
+        if language && repo_language&.downcase != language.downcase
+          puts "#{index + 1}. Skipping #{org}/#{repo_name} (#{repo_language || 'unknown'}) - language mismatch"
+          next
+        end
+
+        print "#{index + 1}. Searching #{org}/#{repo_name} (#{repo_language || 'unknown'})... "
+
+        repo_results = search_repository(query, org, repo_name, token, language)
+
+        if repo_results.nil?
+          puts '⚠️ Rate limited - stopping'
+          break
+        elsif repo_results.empty?
+          puts '❌ No matches'
+        else
+          puts "✅ Found #{repo_results.length} matches"
+          all_results.concat(repo_results)
+        end
+
+        @rate_limiter.repository_delay if index < org_repos.length - 1
+      end
+
+      puts ''
+      puts "Organization search completed. Found #{all_results.length} total matches in #{org}."
+      all_results
+    end
+
+    def search_high_value_repositories(query, token, high_value_repos, language = nil)
+      language_msg = language ? " (#{language.upcase} only)" : ''
+      puts "Searching #{high_value_repos.length} high-value bounty repositories (sorted by bounty size)#{language_msg}"
       puts ''
 
       results = []
@@ -102,7 +224,7 @@ module ImmuneFiSearch
 
         print "#{index + 1}. Searching #{owner}/#{repo} ($#{format_currency(bounty_amount)} - #{project_name})... "
 
-        repo_results = search_repository(query, owner, repo, token)
+        repo_results = search_repository(query, owner, repo, token, language)
 
         if repo_results.nil?
           puts '⚠️ Rate limited - stopping'

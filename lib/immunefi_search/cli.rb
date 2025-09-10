@@ -28,8 +28,17 @@ module ImmuneFiSearch
           @options[:repo] = repo
         end
 
+        opts.on('-o', '--org ORGANIZATION', 'Search all repositories in organization (use with --search)') do |org|
+          @options[:org] = org
+        end
+
         opts.on('-f', '--full', 'Run comprehensive search: global + high-value repositories (use with --search)') do
           @options[:full] = true
+        end
+
+        opts.on('-L', '--language LANG',
+                'Filter search to specific language: go, rust, solidity, move (use with --search)') do |lang|
+          @options[:language] = lang.downcase
         end
 
         opts.on('-v', '--verbose', 'Show detailed asset information in list mode') do
@@ -67,21 +76,37 @@ module ImmuneFiSearch
         puts '  export GITHUB_TOKEN=your_github_token_here'
         puts ''
         puts 'Or run with the token:'
-        if @options[:repo]
-          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}' --repo #{@options[:repo]}"
-        elsif @options[:full]
-          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}' --full"
-        else
-          puts "  GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}'"
-        end
+        command = "GITHUB_TOKEN=your_token ./bin/immunefi-search --search '#{@options[:query]}'"
+        command += " --repo #{@options[:repo]}" if @options[:repo]
+        command += " --org #{@options[:org]}" if @options[:org]
+        command += ' --full' if @options[:full]
+        command += " --language #{@options[:language]}" if @options[:language]
+        puts "  #{command}"
         exit 1
       end
 
       # Validate conflicting flags
-      if @options[:repo] && @options[:full]
-        puts 'Error: --repo and --full flags cannot be used together'
-        puts 'Use --repo for single repository search, or --full for comprehensive search'
+      exclusive_flags = [@options[:repo], @options[:org], @options[:full]].compact
+      if exclusive_flags.size > 1
+        flags = []
+        flags << '--repo' if @options[:repo]
+        flags << '--org' if @options[:org]
+        flags << '--full' if @options[:full]
+        puts "Error: #{flags.join(', ')} flags cannot be used together"
+        puts 'Choose one: --repo for single repository, --org for organization, --full for comprehensive search'
         exit 1
+      end
+
+      # Validate language filter
+      if @options[:language]
+        require_relative 'config'
+        valid_languages = ImmuneFiSearch::TARGET_LANGUAGES
+        unless valid_languages.include?(@options[:language])
+          puts "Error: Invalid language '#{@options[:language]}'"
+          puts "Supported languages: #{valid_languages.join(', ')}"
+          puts 'Example: --language go'
+          exit 1
+        end
       end
 
       # Validate repo format if specified
