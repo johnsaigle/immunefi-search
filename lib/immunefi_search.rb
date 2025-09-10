@@ -34,52 +34,57 @@ module ImmuneFiSearch
       end
     end
 
-    def run_search_mode(query, repo = nil, full = false, language = nil, org = nil)
+    def run_search_mode(query, repo = nil, full = false, language = nil, org = nil, exact = false)
       token = ENV['GITHUB_TOKEN']
 
+      # Apply exact match formatting if requested
+      formatted_query = exact ? "\"#{query}\"" : query
+
       if repo
-        run_single_repository_search(query, repo, token, language)
+        run_single_repository_search(formatted_query, repo, token, language, exact)
       elsif org
-        run_organization_search(query, org, token, language)
+        run_organization_search(formatted_query, org, token, language, exact)
       elsif full
-        run_full_search(query, token, language)
+        run_full_search(formatted_query, token, language, exact)
       else
-        run_multi_phase_search(query, token, language)
+        run_multi_phase_search(formatted_query, token, language, exact)
       end
     end
 
     private
 
-    def run_single_repository_search(query, repo, token, language = nil)
+    def run_single_repository_search(query, repo, token, language = nil, exact = false)
       # Check rate limit status
       @rate_limiter.check_rate_limit_status(token)
       puts ''
 
-      if language
-        puts "Filtering results to #{language.upcase} language only"
-        puts ''
-      end
+      exact_msg = exact ? ' (exact phrase)' : ''
+      language_msg = language ? " (#{language.upcase} only)" : ''
+      puts "Search mode: Single repository#{exact_msg}#{language_msg}" if exact || language
+      puts '' if exact || language
 
-      results = @github_searcher.search_single_repository(query, repo, token, language)
+      results = @github_searcher.search_single_repository(query, repo, token, language, exact)
       @formatter.display_search_results(results)
     end
 
-    def run_organization_search(query, org, token, language = nil)
+    def run_organization_search(query, org, token, language = nil, exact = false)
       # Check rate limit status
       @rate_limiter.check_rate_limit_status(token)
       puts ''
 
+      exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
-      puts "Searching all repositories in #{org} organization for: #{query}#{language_msg}"
+      puts "Searching all repositories in #{org} organization for: #{query}#{exact_msg}#{language_msg}"
       puts ''
 
-      results = @github_searcher.search_organization_repositories(query, org, token, language)
+      results = @github_searcher.search_organization_repositories(query, org, token, language, exact)
       @formatter.display_search_results(results)
     end
 
-    def run_multi_phase_search(query, token, language = nil)
+    def run_multi_phase_search(query, token, language = nil, exact = false)
+      exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
-      puts "Searching GitHub for: #{query}#{language_msg}"
+      puts "Searching GitHub for: #{query}#{exact_msg}#{language_msg}"
       puts 'Cross-referencing with Immunefi bounties...'
 
       # Check rate limit status
@@ -87,12 +92,12 @@ module ImmuneFiSearch
       puts ''
 
       # Phase 1: Global search
-      github_results = @github_searcher.global_search(query, token, language)
+      github_results = @github_searcher.global_search(query, token, language, exact)
       bounty_repos = @bounty_manager.load_bounty_repositories
       cross_referenced_results = @repository_filter.find_cross_referenced_results(github_results, bounty_repos)
 
       if cross_referenced_results.empty?
-        run_phase_2_search(query, token, language)
+        run_phase_2_search(query, token, language, exact)
       else
         puts "Phase 1 (global search) found #{cross_referenced_results.length} cross-referenced results:"
         puts ''
@@ -100,9 +105,10 @@ module ImmuneFiSearch
       end
     end
 
-    def run_full_search(query, token, language = nil)
+    def run_full_search(query, token, language = nil, exact = false)
+      exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
-      puts "Running comprehensive search for: #{query}#{language_msg}"
+      puts "Running comprehensive search for: #{query}#{exact_msg}#{language_msg}"
       puts 'This will search both globally and through all high-value bounty repositories...'
       puts ''
 
@@ -114,7 +120,7 @@ module ImmuneFiSearch
 
       # Phase 1: Global search
       puts '=== PHASE 1: GLOBAL SEARCH ==='
-      github_results = @github_searcher.global_search(query, token, language)
+      github_results = @github_searcher.global_search(query, token, language, exact)
       bounty_repos = @bounty_manager.load_bounty_repositories
       cross_referenced_results = @repository_filter.find_cross_referenced_results(github_results, bounty_repos)
 
@@ -133,7 +139,7 @@ module ImmuneFiSearch
 
       # Phase 2: High-value repository search (always run in full mode)
       puts '=== PHASE 2: HIGH-VALUE BOUNTY REPOSITORIES ==='
-      phase2_results = run_phase_2_search_internal(query, token, language)
+      phase2_results = run_phase_2_search_internal(query, token, language, exact)
       all_results.concat(phase2_results)
 
       # Summary
@@ -145,17 +151,18 @@ module ImmuneFiSearch
       puts "Phase 2 (High-value repos): #{phase2_results.length} results"
     end
 
-    def run_phase_2_search(query, token, language = nil)
+    def run_phase_2_search(query, token, language = nil, exact = false)
+      exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
       puts 'Phase 1 (global search) found no cross-referenced results.'
-      puts "Starting Phase 2: Searching high-value bounty repositories#{language_msg}..."
+      puts "Starting Phase 2: Searching high-value bounty repositories#{exact_msg}#{language_msg}..."
       puts ''
 
-      phase2_results = run_phase_2_search_internal(query, token, language)
+      phase2_results = run_phase_2_search_internal(query, token, language, exact)
       @formatter.display_search_results(phase2_results)
     end
 
-    def run_phase_2_search_internal(query, token, language = nil)
+    def run_phase_2_search_internal(query, token, language = nil, exact = false)
       # Get high-value projects sorted by bounty amount
       projects = @bounty_manager.fetch_projects
       high_value_projects = @bounty_manager.get_high_value_projects_sorted(projects)
@@ -164,7 +171,7 @@ module ImmuneFiSearch
       high_value_repos = @repository_filter.extract_repositories_from_high_value_projects(high_value_projects)
 
       # Search individual repositories
-      @github_searcher.search_high_value_repositories(query, token, high_value_repos, language)
+      @github_searcher.search_high_value_repositories(query, token, high_value_repos, language, exact)
     end
   end
 end

@@ -1,5 +1,7 @@
 # Agent Guidelines for immunefi-search
 
+You do not have access to GITHUB_TOKEN and testing with a fake token will fail.
+
 ## Build/Test/Lint Commands
 - **Run list mode**: `./bin/immunefi-search --list` (or just `./bin/immunefi-search`)
 - **Run search mode**: `GITHUB_TOKEN=xxx ./bin/immunefi-search --search "pattern"`

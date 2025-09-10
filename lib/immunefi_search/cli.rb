@@ -41,6 +41,10 @@ module ImmuneFiSearch
           @options[:language] = lang.downcase
         end
 
+        opts.on('-e', '--exact', 'Search for exact phrase match (use with --search)') do
+          @options[:exact] = true
+        end
+
         opts.on('-v', '--verbose', 'Show detailed asset information in list mode') do
           @options[:verbose] = true
         end
@@ -81,6 +85,7 @@ module ImmuneFiSearch
         command += " --org #{@options[:org]}" if @options[:org]
         command += ' --full' if @options[:full]
         command += " --language #{@options[:language]}" if @options[:language]
+        command += ' --exact' if @options[:exact]
         puts "  #{command}"
         exit 1
       end

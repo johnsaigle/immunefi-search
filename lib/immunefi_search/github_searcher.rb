@@ -9,7 +9,7 @@ module ImmuneFiSearch
       @rate_limiter = RateLimiter.new
     end
 
-    def global_search(query, token, language = nil)
+    def global_search(query, token, language = nil, exact = false)
       github_results = []
 
       # If language filter is specified, only search that language
@@ -26,9 +26,10 @@ module ImmuneFiSearch
       end
 
       languages_to_search.each_with_index do |lang, index|
-        puts "Searching #{lang.upcase} repositories... (#{index + 1}/#{languages_to_search.length})"
+        exact_msg = exact ? ' (exact phrase)' : ''
+        puts "Searching #{lang.upcase} repositories#{exact_msg}... (#{index + 1}/#{languages_to_search.length})"
 
-        results = search_github_by_language(query, lang, token)
+        results = search_github_by_language(query, lang, token, exact)
         github_results += parse_github_results(results, lang) if results
 
         # Add delay between requests to be respectful to the API
@@ -39,8 +40,9 @@ module ImmuneFiSearch
       github_results
     end
 
-    def search_repository(query, owner, repo, token, language = nil)
+    def search_repository(query, owner, repo, token, language = nil, _exact = false)
       # Use GitHub's global code search API with repo qualifier
+      # Note: query is already quoted if exact=true from the calling method
       search_query = "#{query} repo:#{owner}/#{repo}"
       search_query += " language:#{language}" if language
       encoded_query = URI.encode_www_form_component(search_query)
@@ -139,14 +141,15 @@ module ImmuneFiSearch
       []
     end
 
-    def search_single_repository(query, repo_spec, token, language = nil)
+    def search_single_repository(query, repo_spec, token, language = nil, exact = false)
       owner, repo = repo_spec.split('/', 2)
       language_filter = language ? " language:#{language}" : ''
-      puts "Searching repository #{owner}/#{repo} for: #{query}#{language_filter}"
+      exact_msg = exact ? ' (exact phrase)' : ''
+      puts "Searching repository #{owner}/#{repo} for: #{query}#{language_filter}#{exact_msg}"
       puts "API endpoint: https://api.github.com/search/code?q=#{query}#{language_filter} repo:#{owner}/#{repo}"
       puts ''
 
-      results = search_repository(query, owner, repo, token, language)
+      results = search_repository(query, owner, repo, token, language, exact)
 
       if results.nil?
         puts '⚠️ Search failed due to rate limiting'
@@ -160,8 +163,9 @@ module ImmuneFiSearch
       end
     end
 
-    def search_organization_repositories(query, org, token, language = nil)
-      puts "Discovering repositories in #{org} organization..."
+    def search_organization_repositories(query, org, token, language = nil, exact = false)
+      exact_msg = exact ? ' (exact phrase)' : ''
+      puts "Discovering repositories in #{org} organization#{exact_msg}..."
 
       # Get list of repositories in the organization
       org_repos = fetch_organization_repositories(org, token)
@@ -189,7 +193,7 @@ module ImmuneFiSearch
 
         print "#{index + 1}. Searching #{org}/#{repo_name} (#{repo_language || 'unknown'})... "
 
-        repo_results = search_repository(query, org, repo_name, token, language)
+        repo_results = search_repository(query, org, repo_name, token, language, exact)
 
         if repo_results.nil?
           puts '⚠️ Rate limited - stopping'
@@ -209,9 +213,10 @@ module ImmuneFiSearch
       all_results
     end
 
-    def search_high_value_repositories(query, token, high_value_repos, language = nil)
+    def search_high_value_repositories(query, token, high_value_repos, language = nil, exact = false)
+      exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
-      puts "Searching #{high_value_repos.length} high-value bounty repositories (sorted by bounty size)#{language_msg}"
+      puts "Searching #{high_value_repos.length} high-value bounty repositories (sorted by bounty size)#{exact_msg}#{language_msg}"
       puts ''
 
       results = []
@@ -224,7 +229,7 @@ module ImmuneFiSearch
 
         print "#{index + 1}. Searching #{owner}/#{repo} ($#{format_currency(bounty_amount)} - #{project_name})... "
 
-        repo_results = search_repository(query, owner, repo, token, language)
+        repo_results = search_repository(query, owner, repo, token, language, exact)
 
         if repo_results.nil?
           puts '⚠️ Rate limited - stopping'
@@ -246,7 +251,8 @@ module ImmuneFiSearch
 
     private
 
-    def search_github_by_language(query, language, token)
+    def search_github_by_language(query, language, token, _exact = false)
+      # NOTE: query is already quoted if exact=true from the calling method
       encoded_query = URI.encode_www_form_component("#{query} in:file language:#{language}")
       uri = URI("https://api.github.com/search/code?q=#{encoded_query}")
 
