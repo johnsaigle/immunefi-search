@@ -36,6 +36,33 @@ module ImmuneFiSearch
       end
     end
 
+    def wait_for_rate_limit_reset(reset_time, context = 'API')
+      wait_seconds = [reset_time - Time.now.to_i, 0].max
+      wait_minutes = (wait_seconds / 60.0).ceil
+
+      puts '⚠️ Rate limited - waiting for reset...'
+      puts "   Reset at: #{Time.at(reset_time).strftime('%H:%M:%S')}"
+      puts "   Wait time: ~#{wait_minutes} minutes"
+      puts "   Context: #{context}"
+      puts ''
+
+      return unless wait_seconds > 0
+
+      puts "⏳ Sleeping for #{wait_seconds} seconds..."
+      sleep(wait_seconds + 5) # Add 5 second buffer
+      puts '✅ Rate limit reset - resuming search...'
+    end
+
+    def exponential_backoff(attempt, max_attempts = 5, base_delay = 2)
+      return false if attempt >= max_attempts
+
+      delay = base_delay * (2**attempt) + rand(1..5) # Add jitter
+      puts "⚠️ Rate limited - exponential backoff (attempt #{attempt + 1}/#{max_attempts})"
+      puts "   Waiting #{delay} seconds before retry..."
+      sleep(delay)
+      true
+    end
+
     def api_delay
       sleep(ImmuneFiSearch::API_REQUEST_DELAY)
     end

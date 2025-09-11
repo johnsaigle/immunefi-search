@@ -27,6 +27,9 @@ export GITHUB_TOKEN="your_token_here"
 
 # Filter by programming language
 ./bin/immunefi-search --search "transfer" --language solidity
+
+# Exact phrase matching (vs individual word matching)
+./bin/immunefi-search --search "foo bar" --exact --repo wormhole-foundation/wormhole
 ```
 
 ## Setup
@@ -51,6 +54,7 @@ Search Scope:
 
 Filters:
   -L, --language LANG             Filter by language: go, rust, solidity, move
+  -e, --exact                     Search for exact phrase match
   
 Other:
   -v, --verbose                   Detailed bounty info (list mode)
@@ -63,6 +67,13 @@ Other:
 - **Bounty Threshold**: >$100k programs only  
 - **Repository Count**: 99 high-value bounty repositories
 - **Organizations**: LayerZero, Wormhole, MakerDAO, Chainlink, Lido, etc.
+
+## Advanced Features
+
+- **Exact Matching**: Use `--exact` to search for exact phrases instead of individual words
+- **Smart Rate Limiting**: Exponential backoff with automatic retry on rate limits
+- **Search Resumption**: Large searches cache progress and can resume after interruption
+- **Result Caching**: Completed searches cached for 6 hours to avoid re-work
 
 ## Rate Limits
 

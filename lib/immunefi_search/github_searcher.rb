@@ -2,11 +2,13 @@ require 'net/http'
 require 'json'
 require_relative 'config'
 require_relative 'rate_limiter'
+require_relative 'search_cache'
 
 module ImmuneFiSearch
   class GitHubSearcher
     def initialize
       @rate_limiter = RateLimiter.new
+      @search_cache = SearchCache.new
     end
 
     def global_search(query, token, language = nil, exact = false)
@@ -41,6 +43,10 @@ module ImmuneFiSearch
     end
 
     def search_repository(query, owner, repo, token, language = nil, _exact = false)
+      search_repository_with_retry(query, owner, repo, token, language)
+    end
+
+    def search_repository_with_retry(query, owner, repo, token, language = nil, attempt = 0)
       # Use GitHub's global code search API with repo qualifier
       # Note: query is already quoted if exact=true from the calling method
       search_query = "#{query} repo:#{owner}/#{repo}"
@@ -61,8 +67,15 @@ module ImmuneFiSearch
           parse_repository_search_results(results, owner, repo)
         when '403'
           if res['X-RateLimit-Remaining']&.to_i == 0
-            puts "⚠️ Rate limited - remaining: #{res['X-RateLimit-Remaining']}, reset at: #{Time.at(res['X-RateLimit-Reset'].to_i)}"
-            return nil # Signal rate limit hit
+            reset_time = res['X-RateLimit-Reset']&.to_i
+            return nil unless reset_time
+
+            @rate_limiter.wait_for_rate_limit_reset(reset_time, "searching #{owner}/#{repo}")
+            # Retry after rate limit reset
+            return search_repository_with_retry(query, owner, repo, token, language, 0)
+
+          # Signal rate limit hit without reset time
+
           else
             puts '⚠️ Access forbidden (403) - may be private repo or insufficient permissions'
             return [] # Access denied but continue
@@ -73,6 +86,15 @@ module ImmuneFiSearch
         when '422'
           puts '⚠️ Search query invalid or too complex (422)'
           return []
+        when '429', '502', '503', '504'
+          # Temporary errors - use exponential backoff
+          if @rate_limiter.exponential_backoff(attempt, 3)
+            return search_repository_with_retry(query, owner, repo, token, language, attempt + 1)
+          end
+
+          puts "⚠️ Max retries exceeded for #{owner}/#{repo} - skipping"
+          return []
+
         else
           puts "⚠️ GitHub API error: #{res.code} #{res.message}"
           puts "Response body: #{res.body[0..200]}..." if res.body
@@ -80,8 +102,14 @@ module ImmuneFiSearch
         end
       end
     rescue StandardError => e
-      puts "⚠️ Network error searching #{owner}/#{repo}: #{e.message}"
-      [] # Network errors but continue
+      if attempt < 2
+        puts "⚠️ Network error searching #{owner}/#{repo}: #{e.message} - retrying..."
+        sleep(2**attempt)
+        search_repository_with_retry(query, owner, repo, token, language, attempt + 1)
+      else
+        puts "⚠️ Network error searching #{owner}/#{repo}: #{e.message}"
+        [] # Network errors but continue
+      end
     end
 
     def fetch_organization_repositories(org, token)
@@ -214,16 +242,38 @@ module ImmuneFiSearch
     end
 
     def search_high_value_repositories(query, token, high_value_repos, language = nil, exact = false)
+      # Create cache key for this search
+      cache_key = @search_cache.cache_key(query, high_value_repos, language, exact)
+
+      # Check for cached results first
+      cached_results = @search_cache.load_cached_results(cache_key, 6) # 6 hour cache
+      return cached_results if cached_results
+
+      # Load any existing progress
+      progress = @search_cache.load_progress(cache_key)
+      completed_repos = progress[:completed_repos] || []
+      results = progress[:results] || []
+
       exact_msg = exact ? ' (exact phrase)' : ''
       language_msg = language ? " (#{language.upcase} only)" : ''
+
+      if completed_repos.any?
+        puts "Resuming search from repository #{completed_repos.length + 1}/#{high_value_repos.length}"
+        puts "Already found #{results.length} matches in completed repositories"
+        puts ''
+      end
+
       puts "Searching #{high_value_repos.length} high-value bounty repositories (sorted by bounty size)#{exact_msg}#{language_msg}"
       puts ''
-
-      results = []
 
       high_value_repos.each_with_index do |repo_info, index|
         owner = repo_info[:owner]
         repo = repo_info[:repo]
+        repo_key = "#{owner}/#{repo}"
+
+        # Skip if already completed
+        next if completed_repos.include?(repo_key)
+
         bounty_amount = repo_info[:bounty_amount]
         project_name = repo_info[:project_name]
 
@@ -232,7 +282,9 @@ module ImmuneFiSearch
         repo_results = search_repository(query, owner, repo, token, language, exact)
 
         if repo_results.nil?
-          puts '⚠️ Rate limited - stopping'
+          puts '⚠️ Rate limited - saving progress'
+          @search_cache.save_progress(cache_key, completed_repos, results)
+          puts '   Progress saved. Resume with the same command later.'
           break
         elsif repo_results.empty?
           puts '❌ No matches'
@@ -241,11 +293,28 @@ module ImmuneFiSearch
           results.concat(repo_results)
         end
 
+        # Mark this repo as completed and save progress periodically
+        completed_repos << repo_key
+        if completed_repos.length % 10 == 0 # Save every 10 repos
+          @search_cache.save_progress(cache_key, completed_repos, results)
+        end
+
         @rate_limiter.repository_delay if index < high_value_repos.length - 1
       end
 
-      puts ''
-      puts "Phase 2 completed. Found #{results.length} total matches in high-value repositories."
+      # Save final results and cleanup progress
+      if completed_repos.length == high_value_repos.length
+        @search_cache.cache_results(cache_key, results)
+        @search_cache.cleanup_cache(cache_key)
+        puts ''
+        puts "✅ Search completed. Found #{results.length} total matches in high-value repositories."
+      else
+        @search_cache.save_progress(cache_key, completed_repos, results)
+        puts ''
+        puts "⚠️ Search incomplete. Found #{results.length} matches in #{completed_repos.length}/#{high_value_repos.length} repositories."
+        puts '   Resume by running the same command again.'
+      end
+
       results
     end
 
